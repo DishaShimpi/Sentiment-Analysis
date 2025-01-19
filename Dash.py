@@ -56,7 +56,7 @@ class SentimentDataset(Dataset):
         }
 
 # Load Dataset
-DATA_PATH = "processed_dataset1.csv"  # Replace with your dataset path
+DATA_PATH = "processed_dataset.csv"  # Replace with your dataset path
 df = pd.read_csv(DATA_PATH)
 df['Comments'] = df['Comments'].fillna('missing').apply(preprocess_text)
 df['Sentiment'] = df['Sentiment'].fillna('neutral')
