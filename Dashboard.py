@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, classification_report
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, classification_report, roc_curve, auc
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 import re
@@ -22,7 +22,6 @@ def preprocess_text(text):
     text = re.sub(r'\@\w+|\#', '', text)  # Remove mentions and hashtags
     text = re.sub(r'[^A-Za-z0-9\s]', '', text)  # Remove special characters and punctuation
     text = re.sub(r'\s+', ' ', text).strip()  # Remove extra spaces
-    # Optional: Remove stopwords
     stop_words = set(stopwords.words('english'))
     text = " ".join([word for word in text.split() if word not in stop_words])
     return text
@@ -56,16 +55,24 @@ class SentimentDataset(Dataset):
         }
 
 # Load Dataset
-DATA_PATH = "processed_dataset1.csv"  # Replace with your dataset path
+DATA_PATH = "processed_dataset.csv"
 df = pd.read_csv(DATA_PATH)
 df['Comments'] = df['Comments'].fillna('missing').apply(preprocess_text)
 df['Sentiment'] = df['Sentiment'].fillna('neutral')
+
+print("Dataset Head:\n", df.head())
 
 # Label Encoding
 label_encoder = LabelEncoder()
 df['label'] = label_encoder.fit_transform(df['Sentiment'])
 num_labels = len(label_encoder.classes_)
 print(f"Number of unique labels: {num_labels} ({label_encoder.classes_})")
+
+# Label Distribution
+plt.figure(figsize=(6, 4))
+sns.countplot(data=df, x='Sentiment', order=label_encoder.classes_)
+plt.title("Label Distribution")
+plt.show()
 
 # Split Data
 from sklearn.model_selection import train_test_split
@@ -77,7 +84,7 @@ train_texts, test_texts, train_labels, test_labels = train_test_split(
 )
 
 # Tokenizer
-MODEL_NAME = "distilbert-base-uncased"  # Ensure this matches your model's architecture
+MODEL_NAME = "distilbert-base-uncased"
 tokenizer = DistilBertTokenizer.from_pretrained(MODEL_NAME)
 
 # Datasets and Dataloaders
@@ -87,9 +94,8 @@ test_dataset = SentimentDataset(test_texts.tolist(), test_labels.tolist(), token
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # Initialize and Load Pre-Trained Model
-pretrained_model_path = "distilbert_sentiment_model.pt"  # Replace with your model's path
+pretrained_model_path = "distilbert_sentiment_model.pt"
 
-# Load model onto the correct device (CPU or GPU)
 model = DistilBertForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=num_labels).to(device)
 model.load_state_dict(torch.load(pretrained_model_path, map_location=device))
 model.eval()
@@ -101,6 +107,7 @@ def evaluate(model, test_loader):
     total_loss, correct, total = 0, 0, 0
     all_preds = []
     all_labels = []
+    all_probs = []
     criterion = nn.CrossEntropyLoss()
 
     with torch.no_grad():
@@ -111,12 +118,14 @@ def evaluate(model, test_loader):
             logits = outputs.logits
 
             total_loss += loss.item()
-            preds = torch.argmax(logits, dim=1)
+            probs = torch.softmax(logits, dim=1)
+            preds = torch.argmax(probs, dim=1)
             correct += (preds == labels).sum().item()
             total += labels.size(0)
 
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
+            all_probs.extend(probs.cpu().numpy())
 
     accuracy = correct / total
     precision = precision_score(all_labels, all_preds, average="weighted")
@@ -129,9 +138,9 @@ def evaluate(model, test_loader):
     print("\nConfusion Matrix:")
     print(cm)
 
-    return total_loss / len(test_loader), accuracy, precision, recall, f1, cm
+    return total_loss / len(test_loader), accuracy, precision, recall, f1, cm, all_probs, all_labels
 
-# Visualization Function for Confusion Matrix
+# Plot Confusion Matrix
 def plot_confusion_matrix(cm, classes):
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=classes, yticklabels=classes)
@@ -140,8 +149,22 @@ def plot_confusion_matrix(cm, classes):
     plt.title("Confusion Matrix")
     plt.show()
 
+# Plot ROC Curve
+def plot_roc_curve(y_true, y_probs, classes):
+    plt.figure(figsize=(10, 8))
+    for i, class_label in enumerate(classes):
+        fpr, tpr, _ = roc_curve(y_true == i, y_probs[:, i])
+        roc_auc = auc(fpr, tpr)
+        plt.plot(fpr, tpr, label=f"Class {class_label} (AUC = {roc_auc:.2f})")
+    plt.plot([0, 1], [0, 1], "k--", label="Random Guess")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve")
+    plt.legend()
+    plt.show()
+
 # Evaluate the Model
-test_loss, test_accuracy, precision, recall, f1, cm = evaluate(model, test_loader)
+test_loss, test_accuracy, precision, recall, f1, cm, all_probs, all_labels = evaluate(model, test_loader)
 
 print(f"\nTest Loss: {test_loss:.4f}")
 print(f"Test Accuracy: {test_accuracy:.4f}")
@@ -149,3 +172,6 @@ print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1-Score: {f1:.4f}")
 
 # Plot Confusion Matrix
 plot_confusion_matrix(cm, label_encoder.classes_)
+
+# Plot ROC Curve
+plot_roc_curve(np.array(all_labels), np.array(all_probs), label_encoder.classes_)
