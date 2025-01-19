@@ -10,10 +10,15 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from nltk.corpus import stopwords
 from tqdm import tqdm
+import streamlit as st
+import nltk
+
+# Ensure stopwords are downloaded
+nltk.download("stopwords")
 
 # Device Configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
+st.write(f"Using device: {device}")
 
 # Preprocessing Function
 def preprocess_text(text):
@@ -22,7 +27,6 @@ def preprocess_text(text):
     text = re.sub(r'\@\w+|\#', '', text)  # Remove mentions and hashtags
     text = re.sub(r'[^A-Za-z0-9\s]', '', text)  # Remove special characters and punctuation
     text = re.sub(r'\s+', ' ', text).strip()  # Remove extra spaces
-    # Optional: Remove stopwords
     stop_words = set(stopwords.words('english'))
     text = " ".join([word for word in text.split() if word not in stop_words])
     return text
@@ -65,7 +69,7 @@ df['Sentiment'] = df['Sentiment'].fillna('neutral')
 label_encoder = LabelEncoder()
 df['label'] = label_encoder.fit_transform(df['Sentiment'])
 num_labels = len(label_encoder.classes_)
-print(f"Number of unique labels: {num_labels} ({label_encoder.classes_})")
+st.write(f"Number of unique labels: {num_labels} ({label_encoder.classes_})")
 
 # Split Data
 from sklearn.model_selection import train_test_split
@@ -77,7 +81,7 @@ train_texts, test_texts, train_labels, test_labels = train_test_split(
 )
 
 # Tokenizer
-MODEL_NAME = "distilbert-base-uncased"  # Ensure this matches your model's architecture
+MODEL_NAME = "distilbert-base-uncased"
 tokenizer = DistilBertTokenizer.from_pretrained(MODEL_NAME)
 
 # Datasets and Dataloaders
@@ -88,12 +92,10 @@ test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # Initialize and Load Pre-Trained Model
 pretrained_model_path = "distilbert_sentiment_model.pt"  # Replace with your model's path
-
-# Load model onto the correct device (CPU or GPU)
 model = DistilBertForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=num_labels).to(device)
 model.load_state_dict(torch.load(pretrained_model_path, map_location=device))
 model.eval()
-print("Pre-trained model loaded successfully.")
+st.write("Pre-trained model loaded successfully.")
 
 # Evaluation Function
 def evaluate(model, test_loader):
@@ -124,28 +126,28 @@ def evaluate(model, test_loader):
     f1 = f1_score(all_labels, all_preds, average="weighted")
     cm = confusion_matrix(all_labels, all_preds)
 
-    print("\nClassification Report:")
-    print(classification_report(all_labels, all_preds, target_names=label_encoder.classes_))
-    print("\nConfusion Matrix:")
-    print(cm)
+    st.write("\nClassification Report:")
+    st.write(classification_report(all_labels, all_preds, target_names=label_encoder.classes_))
+    st.write("\nConfusion Matrix:")
+    st.write(cm)
 
     return total_loss / len(test_loader), accuracy, precision, recall, f1, cm
 
 # Visualization Function for Confusion Matrix
 def plot_confusion_matrix(cm, classes):
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=classes, yticklabels=classes)
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=classes, yticklabels=classes, ax=ax)
     plt.xlabel("Predicted Labels")
     plt.ylabel("True Labels")
     plt.title("Confusion Matrix")
-    plt.show()
+    st.pyplot(fig)
 
 # Evaluate the Model
 test_loss, test_accuracy, precision, recall, f1, cm = evaluate(model, test_loader)
 
-print(f"\nTest Loss: {test_loss:.4f}")
-print(f"Test Accuracy: {test_accuracy:.4f}")
-print(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1-Score: {f1:.4f}")
+st.write(f"\nTest Loss: {test_loss:.4f}")
+st.write(f"Test Accuracy: {test_accuracy:.4f}")
+st.write(f"Precision: {precision:.4f}, Recall: {recall:.4f}, F1-Score: {f1:.4f}")
 
 # Plot Confusion Matrix
 plot_confusion_matrix(cm, label_encoder.classes_)
